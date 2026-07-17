@@ -52,7 +52,9 @@ export const AuthProvider = ({ children }) => {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     };
-    return fetch(`http://localhost:5000/api${url}`, { ...options, headers });
+    
+    // Đã cập nhật: Trỏ API trực tiếp lên server Render của bạn thay vì localhost:5000
+    return fetch(`https://task-app-kthanh.onrender.com/api${url}`, { ...options, headers });
   };
 
   return (
