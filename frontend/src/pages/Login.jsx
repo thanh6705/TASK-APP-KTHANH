@@ -14,8 +14,8 @@ const Login = () => {
     setError("");
     const endpoint = isRegister ? "/auth/register" : "/auth/login";
     
-    try {
-      const res = await fetch(`http://localhost:5000/api${endpoint}`, {
+   try {
+      const res = await fetch(`https://task-app-kthanh.onrender.com/api${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
