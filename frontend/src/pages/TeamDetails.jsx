@@ -1,271 +1,208 @@
-import { useState, useEffect, useContext } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { AuthContext } from "../context/AuthContext";
-import { Plus, X, Users, Shield, CheckCircle, Clock, AlertCircle, Calendar, ArrowLeft } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowLeft, Users, Plus, CheckCircle2, Link as LinkIcon, ExternalLink, Send, X } from "lucide-react";
 
-const TeamDetails = () => {
-  const { teamId } = useParams();
-  const navigate = useNavigate();
-  const { fetchWithAuth, user } = useContext(AuthContext);
-
-  // Trạng thái lưu trữ dữ liệu từ Backend
-  const [teamInfo, setTeamInfo] = useState(null);
+const TeamDetails = ({ selectedTeam, user, fetchWithAuth, onBack }) => {
   const [members, setMembers] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [teamTasks, setTeamTasks] = useState([]);
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  
+  // Form tạo task: BE nhận single field `assignee` chứ không phải mảng assignedTo
+  const [taskForm, setTaskForm] = useState({ title: "", description: "", deadline: "", assignee: "" });
+  const [submissionUrls, setSubmissionUrls] = useState({}); 
 
-  // Trạng thái điều khiển Modal tạo công việc nhóm
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [taskForm, setTaskForm] = useState({
-    title: "",
-    description: "",
-    deadline: "",
-    assignee: "" // Lưu ID của thành viên được chỉ định
-  });
-
-  // Gọi API lấy thông tin chi tiết phòng làm việc
-  const getRoomDetails = async () => {
+  const getTeamData = async () => {
     try {
-      // 1. Lấy thông tin cơ bản của nhóm (để biết ai là Leader)
-      const resTeam = await fetchWithAuth(`/team/my-teams`);
-      let currentTeamMeta = null;
-      if (resTeam.ok) {
-        const dataMeta = await resTeam.json();
-        const list = Array.isArray(dataMeta) ? dataMeta : dataMeta.teams || [];
-        currentTeamMeta = list.find(t => t._id === teamId);
-        setTeamInfo(currentTeamMeta);
+      // Khớp đúng endpoint BE: /api/team/:teamId/details
+      const res = await fetchWithAuth(`/team/${selectedTeam._id}/details`);
+      if (res.ok) {
+        const data = await res.json();
+        setMembers(data.members || []);
+        setTeamTasks(data.tasks || []);
       }
+    } catch (err) { 
+      console.error("Lỗi tải chi tiết nhóm:", err); 
+    }
+  };
 
-      // 2. Lấy danh sách thành viên và các task liên quan
-      const resDetails = await fetchWithAuth(`/team/${teamId}/details`);
-      if (resDetails.ok) {
-        const dataDetails = await resDetails.json();
-        setMembers(dataDetails.members || []);
-        setTasks(dataDetails.tasks || []);
+  useEffect(() => { 
+    if (selectedTeam?._id) getTeamData(); 
+  }, [selectedTeam]);
+
+  // Kiểm tra quyền Trưởng nhóm dựa trên trường dữ liệu từ component cha hoặc từ mảng dữ liệu
+  const isLeader = selectedTeam?.isLeader || selectedTeam?.leader === user?._id;
+
+  const handleCreateTeamTask = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      // Khớp đúng endpoint BE: POST /api/team/:teamId/tasks
+      const res = await fetchWithAuth(`/team/${selectedTeam._id}/tasks`, {
+        method: "POST",
+        body: JSON.stringify(taskForm)
+      });
+      if (res.ok) {
+        setIsCreateTaskOpen(false);
+        setTaskForm({ title: "", description: "", deadline: "", assignee: "" });
+        getTeamData();
       } else {
-        const errData = await resDetails.json();
-        setErrorMsg(errData.message || "Không có quyền truy cập phòng này.");
+        const errData = await res.json();
+        alert(errData.message || "Lỗi giao task!");
       }
-    } catch (err) {
-      setErrorMsg("Lỗi kết nối đến máy chủ.");
+    } catch (err) { 
+      alert("Lỗi hệ thống!"); 
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (teamId) getRoomDetails();
-  }, [teamId]);
-
-  // Hàm xử lý khi Trưởng nhóm gửi form tạo task và chỉ định thành viên
-  const handleCreateTeamTask = async (e) => {
-    e.preventDefault();
-    if (!taskForm.assignee) {
-      alert("Vui lòng chỉ định một thành viên thực hiện!");
-      return;
-    }
-
+  const handleSubmitUrl = async (taskId) => {
+    const url = submissionUrls[taskId];
+    if (!url) return alert("Vui lòng nhập link trước khi nộp!");
     try {
-      const res = await fetchWithAuth(`/team/${teamId}/tasks`, {
-        method: "POST",
-        body: JSON.stringify(taskForm)
+      // Khớp đúng endpoint cập nhật task của BE: PUT /api/team/tasks/:id
+      const res = await fetchWithAuth(`/team/tasks/${taskId}`, {
+        method: "PUT",
+        body: JSON.stringify({ submittedLink: url, status: "done" })
       });
-
       if (res.ok) {
-        setIsModalOpen(false);
-        setTaskForm({ title: "", description: "", deadline: "", assignee: "" });
-        getRoomDetails(); // Tải lại danh sách task mới tinh vừa tạo
+        alert("Nộp sản phẩm thành công!");
+        getTeamData();
       } else {
-        const err = await res.json();
-        alert(err.message || "Không thể phân bổ công việc.");
+        alert("Không thể nộp link.");
       }
-    } catch (err) {
-      alert("Lỗi đường truyền mạng.");
+    } catch (err) { 
+      alert("Lỗi kết nối server!"); 
     }
   };
 
-  if (loading) return <div className="text-center text-sm font-bold text-slate-500 pt-12">🔄 Đang tải phòng làm việc nhóm...</div>;
-  if (errorMsg) return <div className="text-center text-rose-500 font-bold pt-12">⚠️ {errorMsg}</div>;
-
-  // Xác định quyền: User hiện tại có phải Leader của Team này dựa trên database không
-  const isLeader = teamInfo?.isLeader || teamInfo?.leader === user?.id;
-
-  // ==================== ĐOẠN SỬA LỖI TRƯỜNG LỌC HIỂN THỊ TASK THÀNH VIÊN ====================
-  // Dự phòng trường hợp AuthContext trả về user.id hoặc user._id làm khóa chính đại diện
-  const currentUserId = user?.id || user?._id;
-
-  // PHÂN QUYỀN HIỂN THỊ TASK AN TOÀN TUYỆT ĐỐI: 
-  // - Leader: Nhìn thấy toàn bộ task của cả nhóm
-  // - Member: Chỉ nhìn thấy task do leader giao đúng với ID của chính mình
-  const displayedTasks = isLeader 
-    ? tasks 
-    : tasks.filter(t => {
-        if (!t.user) return false;
-
-        // Trích xuất ID người thực hiện: bọc cả dạng Object (đã được populate) lẫn dạng String thô
-        const assigneeId = typeof t.user === "object" 
-          ? (t.user._id || t.user.id) 
-          : t.user;
-
-        // Ép sang định dạng String để tránh lệch kiểu dữ liệu khi so khớp
-        return String(assigneeId) === String(currentUserId);
-      });
-  // =========================================================================================
-
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Thanh header điều hướng quay lại */}
-      <button 
-        onClick={() => navigate("/teams")}
-        className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-indigo-600 transition-colors"
-      >
-        <ArrowLeft size={14} /> Quay lại danh sách nhóm
-      </button>
-
-      {/* Thông tin Meta của Phòng */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-black text-slate-800">{teamInfo?.name || "Phòng Làm Việc"}</h2>
-            <span className={`flex items-center gap-1 px-3 py-0.5 rounded-full text-[10px] font-bold ${
-              isLeader ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-50 text-slate-600 border border-slate-200'
-            }`}>
-              <Shield size={10} /> {isLeader ? "QUYỀN: TRƯỞNG NHÓM" : "QUYỀN: THÀNH VIÊN"}
-            </span>
-          </div>
-          <p className="text-xs text-slate-400 font-mono">Mã số định danh nhóm: {teamInfo?.teamId}</p>
-        </div>
-
-        {/* Khối hiển thị số lượng và Trưởng nhóm công khai theo yêu cầu */}
-        <div className="flex gap-4 items-center bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100">
-          <div className="text-center border-r pr-4 border-slate-200">
-            <p className="text-[10px] text-slate-400 font-bold uppercase">Thành viên</p>
-            <p className="text-lg font-black text-indigo-600 flex items-center justify-center gap-1">
-              <Users size={16} /> {members.length}
-            </p>
-          </div>
-          <div>
-            <p className="text-[10px] text-slate-400 font-bold uppercase">Trưởng nhóm (Leader)</p>
-            <p className="text-sm font-bold text-slate-700 truncate max-w-[150px]">
-              {members.find(m => m.role === "leader")?.username || "Chưa xác định"}
-            </p>
-          </div>
+    <div className="space-y-6">
+      {/* Thanh header điều hướng */}
+      <div className="flex items-center gap-3">
+        <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-xl transition-all text-slate-600">
+          <ArrowLeft size={16} />
+        </button>
+        <div>
+          <h2 className="text-xl font-black text-slate-800">Phòng Làm Việc: {selectedTeam?.name}</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Mã ID nhóm: <span className="font-bold text-indigo-600">{selectedTeam?.teamId}</span></p>
         </div>
       </div>
 
-      {/* Khu vực Task Workspace */}
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <div>
-            <h3 className="text-lg font-black text-slate-800">
-              {isLeader ? "📋 Toàn Bộ Task Của Đội Nhóm" : "🎯 Task Bạn Cần Thực Hiện"}
-            </h3>
-            <p className="text-xs text-slate-400">
-              {isLeader ? "Theo dõi tiến độ và giao việc cho các thành viên." : "Các công việc do Trưởng nhóm phân công cụ thể cho bạn."}
-            </p>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* DANH SÁCH CÔNG VIỆC NHÓM */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+            <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider">Danh sách việc được giao</h3>
+            {isLeader && (
+              <button onClick={() => setIsCreateTaskOpen(true)} className="bg-indigo-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-1">
+                <Plus size={12}/> Giao việc mới
+              </button>
+            )}
           </div>
 
-          {/* CHỈ TRƯỞNG NHÓM MỚI ĐƯỢC PHÉP THẤY NÚT GIAO TASK */}
-          {isLeader && (
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-1"
-            >
-              <Plus size={14} /> Giao Việc Cho Nhóm
-            </button>
-          )}
+          <div className="space-y-3">
+            {teamTasks.length === 0 ? (
+              <div className="bg-white text-center py-12 text-xs text-slate-400 border rounded-2xl border-dashed">Chưa có công việc nào trong nhóm này.</div>
+            ) : (
+              teamTasks.map((task) => {
+                // Kiểm tra xem user hiện tại có phải người nhận task không
+                const isMyTask = task.user?._id === user?._id;
+                return (
+                  <div key={task._id} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm space-y-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="text-xs font-black text-slate-700">{task.title}</h4>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{task.description || "Không có mô tả."}</p>
+                      </div>
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-500">{task.status}</span>
+                    </div>
+
+                    <div className="text-[10px] text-slate-500 bg-slate-50/80 p-2 rounded-xl flex justify-between items-center">
+                      <span>👤 Người nhận: <span className="font-bold text-slate-700">{task.user?.username || "Chưa chỉ định"}</span></span>
+                      {task.deadline && <span>⏰ Hạn: {new Date(task.deadline).toLocaleDateString("vi-VN")}</span>}
+                    </div>
+
+                    <div className="pt-2 border-t flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
+                      <div>
+                        {task.submittedLink ? (
+                          <div className="flex items-center gap-1 text-emerald-600 font-bold text-[11px]">
+                            <CheckCircle2 size={12}/> Đã nộp sản phẩm: 
+                            <a href={task.submittedLink} target="_blank" rel="noreferrer" className="underline text-indigo-600 flex items-center gap-0.5 font-medium ml-1"><ExternalLink size={10}/>Xem link</a>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 italic text-[11px]">⏳ Chưa nộp báo cáo kết quả.</span>
+                        )}
+                      </div>
+
+                      {/* Hiển thị ô nộp cho đúng thành viên được giao việc và chưa có link */}
+                      {!task.submittedLink && isMyTask && (
+                        <div className="flex gap-1 w-full sm:w-auto">
+                          <input 
+                            type="url" 
+                            placeholder="Dán link (Drive, GitHub...)" 
+                            className="px-2.5 py-1 text-[11px] border rounded-xl outline-none w-full sm:w-48 bg-slate-50"
+                            value={submissionUrls[task._id] || ""}
+                            onChange={e => setSubmissionUrls({ ...submissionUrls, [task._id]: e.target.value })}
+                          />
+                          <button onClick={() => handleSubmitUrl(task._id)} className="bg-emerald-600 text-white p-1.5 rounded-xl"><Send size={12}/></button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
 
-        {/* Render danh sách công việc */}
-        {displayedTasks.length === 0 ? (
-          <div className="bg-white rounded-2xl p-12 text-center border border-dashed text-slate-400 text-sm">
-            Hiện tại chưa có công việc nào được phân bổ tại đây.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {displayedTasks.map(t => (
-              <div key={t._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between items-start gap-2">
-                    <h4 className="font-bold text-slate-800 text-sm">{t.title}</h4>
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase border ${
-                      t.status === 'done' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                      t.status === 'in-progress' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-500 border-slate-200'
-                    }`}>{t.status}</span>
-                  </div>
-                  <p className="text-xs text-slate-400 line-clamp-2">{t.description || "Không có ghi chú mô tả."}</p>
+        {/* THÀNH VIÊN ĐỘI NHÓM */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm h-fit space-y-3">
+          <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5"><Users size={14}/> Thành Viên Nhóm ({members.length})</h3>
+          <div className="divide-y text-xs">
+            {members.map((m) => (
+              <div key={m._id} className="py-2 flex justify-between items-center">
+                <div>
+                  <span className="font-bold text-slate-700">{m.username}</span>
+                  {m._id === selectedTeam?.leader && <span className="ml-1 text-[9px] bg-amber-100 text-amber-700 px-1 rounded">Leader</span>}
                 </div>
-
-                <div className="flex justify-between items-center pt-3 border-t border-slate-100 text-[11px] text-slate-400">
-                  <span className="flex items-center gap-1"><Calendar size={12} /> Hạn: {t.deadline ? new Date(t.deadline).toLocaleString("vi-VN") : "Chưa đặt"}</span>
-                  <div className="text-right">
-                    <p className="text-[9px] text-slate-400 uppercase font-bold">Người làm</p>
-                    <p className="font-bold text-indigo-600">
-                      {typeof t.user === "object" ? t.user?.username : (members.find(m => m._id === t.user)?.username || "Không rõ")}
-                    </p>
-                  </div>
-                </div>
+                <span className="text-[10px] text-slate-400">{m.email}</span>
               </div>
             ))}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* MODAL GIAO TASK DÀNH RIÊNG CHO LEADER */}
-      {isModalOpen && isLeader && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md relative shadow-2xl border animate-in fade-in zoom-in-95 duration-150">
-            <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={18} /></button>
-            
-            <h3 className="text-lg font-black text-slate-800 mb-4">📢 Giao Việc Cho Thành Viên</h3>
-            
-            <form onSubmit={handleCreateTeamTask} className="space-y-4">
+      {/* POPUP MODAL GIAO TASK NHÓM */}
+      {isCreateTaskOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl border relative">
+            <button onClick={() => setIsCreateTaskOpen(false)} className="absolute top-4 right-4 text-slate-400"><X size={16}/></button>
+            <h3 className="text-xs font-black text-slate-800 mb-3 uppercase tracking-wider">🎯 Giao Việc Cho Thành Viên</h3>
+            <form onSubmit={handleCreateTeamTask} className="space-y-3 text-xs">
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">TÊN CÔNG VIỆC</label>
-                <input 
-                  type="text" required placeholder="Nhập tiêu đề task..."
-                  className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-indigo-500"
-                  value={taskForm.title} onChange={e => setTaskForm({...taskForm, title: e.target.value})}
-                />
+                <label className="font-bold text-slate-500 block mb-1">Tiêu đề công việc *</label>
+                <input type="text" required className="w-full px-3 py-2 border rounded-xl outline-none" value={taskForm.title} onChange={e => setTaskForm({ ...taskForm, title: e.target.value })} />
               </div>
-
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">MÔ TẢ YÊU CẦU</label>
-                <textarea 
-                  placeholder="Ghi chú chi tiết công việc..." rows="3"
-                  className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-indigo-500"
-                  value={taskForm.description} onChange={e => setTaskForm({...taskForm, description: e.target.value})}
-                />
+                <label className="font-bold text-slate-500 block mb-1">Mô tả chi tiết</label>
+                <textarea rows="2" className="w-full px-3 py-2 border rounded-xl outline-none" value={taskForm.description} onChange={e => setTaskForm({ ...taskForm, description: e.target.value })} />
               </div>
-
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">CHỈ ĐỊNH THÀNH VIÊN THỰC HIỆN</label>
-                <select
-                  required
-                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white outline-none focus:ring-1 focus:ring-indigo-500"
-                  value={taskForm.assignee} onChange={e => setTaskForm({...taskForm, assignee: e.target.value})}
-                >
-                  <option value="">-- Chọn một thành viên trong nhóm --</option>
+                <label className="font-bold text-slate-500 block mb-1">Hạn chót</label>
+                <input type="datetime-local" className="w-full px-3 py-2 border rounded-xl outline-none" value={taskForm.deadline} onChange={e => setTaskForm({ ...taskForm, deadline: e.target.value })} />
+              </div>
+              <div>
+                <label className="font-bold text-slate-500 block mb-1">Chỉ định người thực hiện *</label>
+                <select required className="w-full px-3 py-2 border rounded-xl bg-white outline-none" value={taskForm.assignee} onChange={e => setTaskForm({ ...taskForm, assignee: e.target.value })}>
+                  <option value="">-- Chọn thành viên nhận việc --</option>
                   {members.map(m => (
-                    <option key={m._id} value={m._id}>
-                      {m.username} ({m.role === 'leader' ? 'Trưởng nhóm' : 'Thành viên'})
-                    </option>
+                    <option key={m._id} value={m._id}>{m.username} ({m.role})</option>
                   ))}
                 </select>
               </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">HẠN CHÓT</label>
-                <input 
-                  type="datetime-local" required
-                  className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-indigo-500"
-                  value={taskForm.deadline} onChange={e => setTaskForm({...taskForm, deadline: e.target.value})}
-                />
-              </div>
-
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg text-sm transition-all shadow-md">
-                Phân Phối Task Đi
+              <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-xl mt-2">
+                {loading ? "Đang xử lý..." : "Phát Hành Công Việc"}
               </button>
             </form>
           </div>

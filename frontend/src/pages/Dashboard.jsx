@@ -8,6 +8,7 @@ import TaskCalendar from "./TaskCalendar";
 import Profile from "./Profile";
 import Settings from "./Settings";
 import Teams from "./Teams"; 
+import TeamDetails from "./TeamDetails"; // Import thêm màn hình chi tiết nhóm
 import { X, Link as LinkIcon, ExternalLink, Save } from "lucide-react";
 
 const Dashboard = () => {
@@ -22,6 +23,9 @@ const Dashboard = () => {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // State lưu trữ nhóm được chọn để truyền vào trang chi tiết phòng làm việc
+  const [selectedTeam, setSelectedTeam] = useState(null);
 
   // State tạm thời để lưu trạng thái người dùng chọn trước khi ấn Lưu
   const [tempStatus, setTempStatus] = useState("");
@@ -61,7 +65,7 @@ const Dashboard = () => {
     } catch (err) { alert("Lỗi!"); }
   };
 
-  // 🛠️ HÀM LƯU TIẾN ĐỘ MỚI: Gửi trực tiếp lên API PUT tổng của công việc để tránh lỗi 404
+  // HÀM LƯU TIẾN ĐỘ: Gửi trực tiếp lên API PUT tổng của công việc
   const handleSaveQuickStatus = async () => {
     setLoading(true);
     try {
@@ -71,7 +75,7 @@ const Dashboard = () => {
         deadline: selectedTask.deadline,
         priority: selectedTask.priority,
         attachmentUrl: selectedTask.attachmentUrl,
-        status: tempStatus // Lấy trạng thái mới từ nút vừa chọn
+        status: tempStatus 
       };
 
       const res = await fetchWithAuth(`/tasks/${selectedTask._id}`, {
@@ -81,7 +85,7 @@ const Dashboard = () => {
 
       if (res.ok) {
         setIsDetailOpen(false);
-        getTasks(); // Tải lại danh sách ra giao diện chính lập tức
+        getTasks(); 
       } else {
         alert("Không thể lưu trạng thái. Vui lòng kiểm tra lại dữ liệu.");
       }
@@ -101,7 +105,7 @@ const Dashboard = () => {
 
   const openTaskDetail = (task) => {
     setSelectedTask(task);
-    setTempStatus(task.status); // Đặt trạng thái ban đầu khi mở modal
+    setTempStatus(task.status); 
     setTaskForm({ title: task.title, description: task.description || "", deadline: task.deadline ? task.deadline.substring(0, 16) : "", priority: task.priority || "MEDIUM", status: task.status, attachmentUrl: task.attachmentUrl || "" });
     setIsDetailOpen(true);
   };
@@ -132,14 +136,34 @@ const Dashboard = () => {
         {currentTab === "calendar" && (
           <TaskCalendar tasks={searchedTasks} openTaskDetail={openTaskDetail} setTaskForm={setTaskForm} setOpenCreateModal={setIsCreateOpen} />
         )}
-        {currentTab === "teams" && <Teams />}
+        
+        {/* ĐIỀU HƯỚNG TAB ĐỘI NHÓM DẠNG SPA KHÔNG BỊ LOAD TRANG */}
+        {currentTab === "teams" && (
+          <Teams 
+            onViewDetails={(teamObj) => {
+              setSelectedTeam(teamObj);
+              setCurrentTab("team-details");
+            }} 
+          />
+        )}
+
+        {/* TAB CHI TIẾT PHÒNG LÀM VIỆC CỦA NHÓM */}
+        {currentTab === "team-details" && (
+          <TeamDetails 
+            selectedTeam={selectedTeam} 
+            user={user} 
+            fetchWithAuth={fetchWithAuth} 
+            onBack={() => setCurrentTab("teams")} 
+          />
+        )}
+
         {currentTab === "profile" && <Profile user={user} />}
         {currentTab === "settings" && (
           <Settings user={user} fetchWithAuth={fetchWithAuth} logout={logout} darkMode={darkMode} setDarkMode={setDarkMode} />
         )}
       </main>
 
-      {/* POPUP TẠO TASK */}
+      {/* POPUP TẠO TASK CÁ NHÂN */}
       {isCreateOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl relative border">
@@ -176,7 +200,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* POPUP CHI TIẾT TASK DETAIL (ĐÃ THÊM NÚT LƯU TIẾN ĐỘ) */}
+      {/* POPUP CHI TIẾT TASK DETAIL */}
       {isDetailOpen && selectedTask && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-xl shadow-xl border overflow-hidden flex flex-col md:flex-row max-h-[80vh]">
@@ -196,7 +220,6 @@ const Dashboard = () => {
               )}
             </div>
 
-            {/* Khối quản lý trạng thái cập nhật nhanh */}
             <div className="w-full md:w-56 bg-slate-50 p-5 border-t md:border-t-0 md:border-l border-slate-100 flex flex-col justify-between">
               <div className="space-y-4 text-xs">
                 <div>
@@ -208,7 +231,6 @@ const Dashboard = () => {
                   <span className="font-black text-indigo-600 block uppercase mt-0.5 text-xs">{selectedTask.status}</span>
                 </div>
                 
-                {/* Chọn Tiến độ dạng click đổi state tạm thời */}
                 <div className="space-y-1.5 pt-3 border-t">
                   <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wide mb-1">Cập nhật tiến độ</span>
                   <div className="grid grid-cols-1 gap-1.5">
@@ -236,7 +258,6 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                {/* 🌟 NÚT LƯU TIẾN ĐỘ THỰC TẾ */}
                 <button
                   type="button"
                   disabled={loading}
@@ -256,7 +277,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* POPUP CHỈNH SỬA TASK */}
+      {/* POPUP CHỈNH SỬA TASK CÁ NHÂN */}
       {isEditOpen && selectedTask && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl relative border">
