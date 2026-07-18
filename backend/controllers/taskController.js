@@ -1,47 +1,43 @@
 const Task = require("../models/Task");
 
-// Lấy danh sách task cá nhân (Chỉ lấy các task KHÔNG có teamId)
+// Lấy danh sách task cá nhân
 exports.getTasks = async (req, res) => {
   try {
-    const userId = req.user.id; // Sử dụng req.user.id thống nhất từ middleware
-    
+    const userId = req.user.id;
     const tasks = await Task.find({
       $and: [
-        // Điều kiện 1: Phải là task của riêng user này tạo hoặc được giao
-        {
-          $or: [
-            { user: userId },
-            { createdBy: userId }
-          ]
-        },
-        // Điều kiện 2: Tuyệt đối KHÔNG chứa trường teamId (để loại bỏ task nhóm)
-        {
-          $or: [
-            { teamId: { $exists: false } },
-            { teamId: "" },
-            { teamId: null }
-          ]
-        }
+        { $or: [{ user: userId }, { createdBy: userId }] },
+        { $or: [{ teamId: { $exists: false } }, { teamId: "" }, { teamId: null }] }
       ]
-    });
+    }).sort({ createdAt: -1 });
     res.json(tasks);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Tạo task cá nhân
+// Tạo task cá nhân mới
 exports.createTask = async (req, res) => {
   try {
-    const { title, description, deadline } = req.body;
+    // 🌟 ĐÃ THÊM attachmentUrl ĐỂ ĐỒNG BỘ DỮ LIỆU TỪ FORM FRONTEND GỬI LÊN
+    const { title, description, deadline, priority, attachmentUrl } = req.body;
+    
+    // Tạo bản ghi log đầu tiên
+    const initialLog = {
+      action: "Đã tạo công việc",
+      performedBy: req.user.username || req.user.name || req.user.email || "User",
+    };
+
     const task = await Task.create({
       title,
       description,
       deadline,
-      status: "todo",
+      priority: priority || "MEDIUM",
+      status: "TODO",
       user: req.user.id,
-      createdBy: req.user.id
-      // Không truyền teamId -> mặc định là Task Cá Nhân độc lập
+      createdBy: req.user.id,
+      attachmentUrl: attachmentUrl || "", // 🌟 LƯU ĐƯỜNG DẪN LINK VÀO DB
+      activityLog: [initialLog]
     });
     res.status(201).json(task);
   } catch (error) {
@@ -49,46 +45,55 @@ exports.createTask = async (req, res) => {
   }
 };
 
-// Cập nhật trạng thái hoặc nội dung task cá nhân
-exports.updateTask = async (req, res) => {
+// Hàm đặc quyền: Chuyển đổi trạng thái theo quy trình (Workflow)
+exports.updateTaskStatus = async (req, res) => {
   try {
+    const { status } = req.body;
     const task = await Task.findById(req.params.id);
 
     if (!task) return res.status(404).json({ message: "Task not found" });
 
-    const isOwner = task.user.toString() === req.user.id.toString();
-    const isCreator = task.createdBy && task.createdBy.toString() === req.user.id.toString();
+    const oldStatus = task.status;
+    task.status = status;
 
-    if (!isOwner && !isCreator) {
-      return res.status(401).json({ message: "Not authorized to update this task" });
-    }
+    // Ghi nhận log chuyển trạng thái công việc
+    task.activityLog.push({
+      action: `Chuyển trạng thái từ [${oldStatus}] sang [${status}]`,
+      performedBy: req.user.username || req.user.name || req.user.email || "User"
+    });
 
-    const updated = await Task.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true }
-    );
+    await task.save();
+    res.json(task);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
+// Cập nhật toàn bộ nội dung task
+exports.updateTask = async (req, res) => {
+  try {
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+
+    // Lưu vết sửa đổi thông tin
+    req.body.activityLog = task.activityLog || [];
+    req.body.activityLog.push({
+      action: "Đã cập nhật thông tin chi tiết công việc",
+      performedBy: req.user.username || req.user.name || req.user.email || "User"
+    });
+
+    const updated = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(updated);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Xóa task cá nhân
+// Xóa công việc
 exports.deleteTask = async (req, res) => {
   try {
     const task = await Task.findById(req.params.id);
-
     if (!task) return res.status(404).json({ message: "Task not found" });
-
-    const isOwner = task.user.toString() === req.user.id.toString();
-    const isCreator = task.createdBy && task.createdBy.toString() === req.user.id.toString();
-
-    if (!isOwner && !isCreator) {
-      return res.status(401).json({ message: "Not authorized to delete this task" });
-    }
-
     await task.deleteOne();
     res.json({ message: "Task removed" });
   } catch (error) {
